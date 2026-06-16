@@ -1,0 +1,30 @@
+# Sherpa 3.0.3 (key4hep) - e+e- -> 2 jets (Z->hadrons) at 91.2 GeV, ISR OFF.
+# Same FIXED-ORDER 2-jet Born setup as Sherpa_2jet_isr_on.yaml ("11 -11 -> 93 93", no 93{3}, no
+# CKKW/MEPS merging), with ISR DISABLED via PDF_LIBRARY: None (incoming lepton energy fixed at
+# 45.6 GeV/beam). NB: shower + hadronization still run on the 2 Born partons.
+#
+# Select at run time:  SHERPA_YAML=Sherpa_2jet_isr_off.yaml ./generate.sh <nev> <outdir>
+
+BEAMS: [11, -11]
+BEAM_ENERGIES: 45.6               # per beam -> ECMS = 91.2 GeV (matches the sibling Sherpa cards)
+
+PDF_LIBRARY: None                 # <-- disable the electron structure function = ISR OFF
+
+ALPHAS(MZ): 0.1188
+ORDER_ALPHAS: 1
+
+PROCESSES:
+- 11 -11 -> 93 93:                # 93 = jet container; EXACTLY 2 jets, no extra emissions, no merging
+    Order: {QCD: 0, EW: 2}        # Born e+e- -> q qbar (light quarks); QCD:0 = no extra-parton ME
+
+EVENTS: 20
+EVENT_OUTPUT: HepMC3_GenEvent[sherpa_events]
+
+# Keep the V0 set stable so they reach DELSIM as final-state. Stable: 1 = particle + antiparticle.
+PARTICLE_DATA:
+  310:  {Stable: 1}   # K0S
+  3122: {Stable: 1}   # Lambda (+ anti)
+  3112: {Stable: 1}   # Sigma-  (+ anti)
+  3222: {Stable: 1}   # Sigma+  (+ anti)
+  3312: {Stable: 1}   # Xi-     (+ anti)
+  3322: {Stable: 1}   # Xi0     (+ anti)
