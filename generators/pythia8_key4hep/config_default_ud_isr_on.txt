@@ -1,0 +1,20 @@
+# Pythia8 8.315 (key4hep) + DEFAULT (Simple) shower: e+e- -> Z/gamma* -> u,d ONLY at 91.2 GeV, ISR ON.
+# Same as config_default_isr_on.txt EXCEPT the Z is forced to decay to LIGHT quarks u,d only
+# (23:onIfAny = 1 2), instead of all five (1 2 3 4 5). Consumed by closure_gen (native EventWriter
+# -> fort.26 -> DELSIM). V0 stability is applied in closure_gen.cpp after this config loads.
+
+# --- beams: e+e- at the Z pole ---
+Beams:idA = 11            # e-
+Beams:idB = -11           # e+
+Beams:eCM = 91.2          # GeV
+
+# --- hard process: s-channel gamma*/Z, decay to LIGHT quarks (d=1, u=2) ONLY ---
+WeakSingleBoson:ffbar2gmZ = on
+23:onMode   = off         # turn all Z decay channels off, then
+23:onIfAny  = 1 2         # Z -> d, u only (light quarks)
+
+# --- parton shower: DEFAULT Simple shower (1 = Simple/default, 2 = Vincia, 3 = Dire) ---
+PartonShowers:model = 1
+
+# --- initial-state radiation: ON (electron structure function -> physical sqrt(s') < 91.2) ---
+PDF:lepton = on

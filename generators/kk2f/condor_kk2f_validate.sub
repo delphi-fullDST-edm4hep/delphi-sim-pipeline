@@ -1,0 +1,25 @@
+# One-job end-to-end validation of the kk2f gen-sim path (run BEFORE the 4x1M production):
+#   NEV=200 isron v95d -> exercises kk2f gen (delphi-kk2f.sif) -> fadgen -> DELSIM (delphi-sim.sif,
+#   2-pass 95d BS override) -> SDST on EOS. Check: ISR x-sec ~30nb, fadgen ok, BS in DELSIM title,
+#   SDST lands. Also gives a realistic per-job runtime to confirm the 5000-evt/job production sizing.
+# Submit (repo root, lxplus):  condor_submit generators/kk2f/condor_kk2f_validate.sub
+universe                = vanilla
+executable              = generators/kk2f/run_kk2f_prod.sh
+arguments               = isron 200 $(ClusterId) $(Process) v95d 260607
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_output_files   = ""
+MY.SendCredential       = true
+getenv                  = False
+
+requirements            = (HasSingularity =?= true)
+request_memory          = 4GB
+request_cpus            = 1
+request_disk            = 20GB
++JobFlavour             = "workday"
+
+log                     = condor_logs/kk2f_validate_$(ClusterId).log
+output                  = condor_logs/kk2f_validate_$(ClusterId).$(Process).out
+error                   = condor_logs/kk2f_validate_$(ClusterId).$(Process).err
+queue 1

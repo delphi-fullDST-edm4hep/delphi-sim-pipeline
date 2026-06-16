@@ -78,12 +78,13 @@ echo "Generated fort.19 with unique NRUN $KK2F_NRUN:"
 cat fort.19
 
 # CRITICAL: Set ISR mode by modifying ONLY .KK2f_defaults line 49
-# KeyISR=1 for ISR ON (EEX), KeyISR=0 for ISR OFF
+# KeyISR=1 for ISR ON, KeyISR=0 for ISR OFF. NB: KeyISR only toggles ISR -- the matrix-element
+# scheme is CEEX (KeyGPS=1, KeyINT=2, per-quark vmaxGPS=0.99 in .KK2f_defaults), NOT EEX.
 echo ""
 echo "=== Configuring ISR mode ==="
 if [ "$ISR_MODE" = "on" ]; then
     KEYISR_VALUE=1
-    echo "Setting KeyISR=1 (ISR ON - EEX exponentiation)"
+    echo "Setting KeyISR=1 (ISR ON; matrix element = CEEX via KeyGPS=1)"
 else
     KEYISR_VALUE=0
     echo "Setting KeyISR=0 (ISR OFF)"
@@ -123,9 +124,9 @@ echo "  $CROSS_SECTION"
 echo ""
 echo "=== ISR Verification ==="
 if [ "$ISR_MODE" = "on" ]; then
-    echo "Expected: Cross-section should be HIGH (e.g., ~85 pb at 200 GeV, ~30 nb at Z pole)"
+    echo "Expected x-sec: 200 GeV ~85 pb (ISR enhances via radiative return); Z pole ~30 nb (ISR SUPPRESSES the Born peak by ~29%)"
 else
-    echo "Expected: Cross-section should be LOW (e.g., ~20 pb at 200 GeV, ~12 nb at Z pole)"
+    echo "Expected x-sec: 200 GeV ~20 pb; Z pole ~42 nb (Born Z->hadrons peak; ISR off => no radiative suppression)"
 fi
 echo "========================================"
 echo ""

@@ -12,16 +12,25 @@
 # Args:  <variant: isron|isroff>  <nev>  <clusterid>  <process>
 set -uo pipefail
 REPO=/afs/cern.ch/work/z/zhangj/delphi-pythia8-pipeline
-EOSBASE=/eos/experiment/eealliance/Samples/DELPHI/1994/91.2/MC/94c
-DATE="${DATE:-260607}"
 GENDIR="$REPO/generators/pythia8_key4hep"
 
-VARIANT="${1:?usage: run_default_prod.sh <isron|isroff> <nev> <clusterid> <process>}"
+VARIANT="${1:?usage: run_default_prod.sh <isron|isroff> <nev> <clusterid> <process> [prodver=v94c] [date]}"
 NEV="${2:?nev}"; CL="${3:?clusterid}"; PR="${4:?process}"
+PROD_VER="${5:-${PROD_VER:-v94c}}"      # v94c = 1994/94c, DELSIM-default BS (legacy) | v95d = 1995/95d + 95d data BS
+DATE="${6:-${DATE:-260607}}"
+case "$PROD_VER" in
+  v94c) EOSBASE=/eos/experiment/eealliance/Samples/DELPHI/1994/91.2/MC/94c; DELSIM_VERSION=v94c
+        export XYZP="-0.29911 0.14225 -0.6121" XYZW="0.01052 0.00512 0.1349" ;;  # 94c data beam spot (added 2026-06-14 for the pythia8_default isron re-run; sherpa/vincia v94c left BS-default)
+  v95d) EOSBASE=/eos/experiment/eealliance/Samples/DELPHI/1995/91.2/MC/95d; DELSIM_VERSION=v95d
+        export XYZP="-0.32026 0.11079 -0.7589" XYZW="0.01208 0.01219 0.30102" ;;  # 95d data beam spot (cm)
+  *) echo "FATAL: unknown PROD_VER='$PROD_VER' (expected v94c|v95d)"; exit 2 ;;
+esac
+echo "=== default_prod CONFIG: PROD_VER=$PROD_VER VERSION=$DELSIM_VERSION DATE=$DATE BS='${XYZP:-<default>}' EOSBASE=$EOSBASE ==="
 case "$VARIANT" in
-  isron)  CFGBASE="$GENDIR/config_default_isr_on.txt";  EOSNAME=pythia8_default_isron  ;;
-  isroff) CFGBASE="$GENDIR/config_default_isr_off.txt"; EOSNAME=pythia8_default_isroff ;;
-  *) echo "FATAL: unknown variant '$VARIANT' (expected isron|isroff)"; exit 2 ;;
+  isron)   CFGBASE="$GENDIR/config_default_isr_on.txt";    EOSNAME=pythia8_default_isron     ;;
+  isroff)  CFGBASE="$GENDIR/config_default_isr_off.txt";   EOSNAME=pythia8_default_isroff    ;;
+  udisron) CFGBASE="$GENDIR/config_default_ud_isr_on.txt"; EOSNAME=pythia8_default_ud_isron  ;;  # Z->u,d only, ISR on
+  *) echo "FATAL: unknown variant '$VARIANT' (expected isron|isroff|udisron)"; exit 2 ;;
 esac
 
 SEED=$(( (CL % 80000) * 10000 + PR ))      # unique per job, kept < 8e8 (Pythia Random:seed max ~9e8)
@@ -43,9 +52,9 @@ printf '\n# per-job seed (injected by run_default_prod.sh)\nRandom:setSeed = on\
 bash "$GENDIR/generate.sh" "$NEV_GEN" "$CFG" "$WORK"
 [ -s "$WORK/fort.26" ] || { echo "ERROR: closure_gen produced no fort.26"; exit 1; }
 
-# 2) DELSIM on the native fort.26 -> SDST  (NEVMAX = NEV target; NRUN from the seed)
+# 2) DELSIM on the native fort.26 -> SDST  (NEVMAX = NEV target; NRUN from the seed; XYZP/XYZW exported above)
 export DELSIM_NRUN=$(( 3000 + SEED % 88000 ))
-bash "$REPO/m2_delsim_lxplus.sh" "$WORK/fort.26" "$NEV"
+bash "$REPO/m2_delsim_lxplus.sh" "$WORK/fort.26" "$NEV" 45.5935 "$DELSIM_VERSION"
 rc=$?
 
 DST="$WORK/fort.26.sdst"
