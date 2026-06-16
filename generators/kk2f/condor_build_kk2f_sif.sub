@@ -1,0 +1,18 @@
+# One-off: build the kk2f generator .sif on a worker, copy to AFS.
+# Submit (repo root, lxplus):  condor_submit generators/kk2f/condor_build_kk2f_sif.sub
+universe                = vanilla
+executable              = generators/kk2f/build_kk2f_sif.sh
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_output_files   = ""
+MY.SendCredential       = true
+getenv                  = False
+requirements            = (HasSingularity =?= true)
+request_memory          = 4GB
+request_cpus            = 1
+request_disk            = 30GB
++JobFlavour             = "workday"
+log                     = condor_logs/build_kk2f_sif_$(ClusterId).log
+output                  = condor_logs/build_kk2f_sif_$(ClusterId).out
+error                   = condor_logs/build_kk2f_sif_$(ClusterId).err
+queue 1
