@@ -8,17 +8,24 @@
 # Args:  <variant: isroff|isrin>  <nev>  <clusterid>  <process>
 set -uo pipefail
 REPO=/afs/cern.ch/work/z/zhangj/delphi-pythia8-pipeline
-EOSBASE=/eos/experiment/eealliance/Samples/DELPHI/1994/91.2/MC/94c
-DATE="${DATE:-260607}"
-
-VARIANT="${1:?usage: run_sherpa_prod.sh <isroff|isrin> <nev> <clusterid> <process>}"
+VARIANT="${1:?usage: run_sherpa_prod.sh <isron|isroff> <nev> <clusterid> <process> [prodver=v94c] [date]}"
 NEV="${2:?nev}"; CL="${3:?clusterid}"; PR="${4:?process}"
+PROD_VER="${5:-${PROD_VER:-v94c}}"      # v94c = 1994/94c, DELSIM-default BS (legacy) | v95d = 1995/95d + 95d data BS
+DATE="${6:-${DATE:-260607}}"
+case "$PROD_VER" in
+  v94c) EOSBASE=/eos/experiment/eealliance/Samples/DELPHI/1994/91.2/MC/94c; export DELSIM_VERSION=v94c ;;
+  v95d) EOSBASE=/eos/experiment/eealliance/Samples/DELPHI/1995/91.2/MC/95d; export DELSIM_VERSION=v95d
+        export XYZP="-0.32026 0.11079 -0.7589" XYZW="0.01208 0.01219 0.30102" ;;  # 95d data beam spot (cm)
+  *) echo "FATAL: unknown PROD_VER='$PROD_VER' (expected v94c|v95d)"; exit 2 ;;
+esac
 
+# NB: sherpa ISR-on variant is 'isron' (the 94c dirs were historically 'isrin'; renamed).
 case "$VARIANT" in
   isroff) YAML=Sherpa_isr_off.yaml; EOSNAME=sherpa_isroff ;;
-  isrin)  YAML=Sherpa_isr_on.yaml;  EOSNAME=sherpa_isrin  ;;
-  *) echo "FATAL: unknown variant '$VARIANT' (expected isroff|isrin)"; exit 2 ;;
+  isron)  YAML=Sherpa_isr_on.yaml;  EOSNAME=sherpa_isron  ;;
+  *) echo "FATAL: unknown variant '$VARIANT' (expected isron|isroff)"; exit 2 ;;
 esac
+echo "=== sherpa_prod CONFIG: PROD_VER=$PROD_VER VERSION=$DELSIM_VERSION DATE=$DATE BS='${XYZP:-<default>}' EOSBASE=$EOSBASE ==="
 
 SEED=$(( (CL % 90000) * 10000 + PR ))   # unique per job within a cluster; fits 32-bit
 TAG="${CL}_${PR}"

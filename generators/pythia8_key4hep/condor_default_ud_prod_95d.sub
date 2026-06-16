@@ -1,0 +1,32 @@
+# Pythia8 DEFAULT shower, Z->u,d ONLY (light quarks), 95d, ISR ON, beam-spot override.
+#   1,000,000 events: 10000 evt/job x 100 jobs.  variant 'udisron' -> config_default_ud_isr_on.txt
+#   (23:onIfAny = 1 2) + EOSNAME pythia8_default_ud_isron.  v95d => 1995/95d + DELSIM v95d + 95d data
+#   beam-spot override. Output -> /eos/.../1995/91.2/MC/95d/SDST/pythia8_default_ud_isron/260607.
+#   closure_gen over-generates 10% (gen 11000, DELSIM 10000). 'tomorrow' flavour + 14h watchdog
+#   (a 10k-event DELSIM with BS-override prerun runs ~4-5h).
+# Submit (from repo root, lxplus):  condor_submit generators/pythia8_key4hep/condor_default_ud_prod_95d.sub
+universe                = vanilla
+executable              = generators/pythia8_key4hep/run_default_prod.sh
+
+NEV                     = 10000
+arguments               = udisron $(NEV) $(ClusterId) $(Process) v95d 260607
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_output_files   = ""
+MY.SendCredential       = true
+getenv                  = False
+
+requirements            = (HasSingularity =?= true)
+request_memory          = 4GB
+request_cpus            = 1
+request_disk            = 20GB
++JobFlavour             = "tomorrow"
+
+periodic_remove         = (JobStatus == 2) && ((time() - JobCurrentStartDate) > 50400)
+
+log                     = condor_logs/default95dUD_$(ClusterId).log
+output                  = condor_logs/default95dUD_$(ClusterId).$(Process).out
+error                   = condor_logs/default95dUD_$(ClusterId).$(Process).err
+
+queue 100

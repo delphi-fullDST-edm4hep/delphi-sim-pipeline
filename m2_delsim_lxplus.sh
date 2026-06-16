@@ -17,7 +17,7 @@ SIF="$REPO/delphi-sim.sif"
 FADGEN="${1:?usage: m2_delsim_lxplus.sh <fadgen_file> [nevmax] [ebeam] [version] [out_sdst]}"
 NEVMAX="${2:-20}"
 EBEAM="${3:-45.5935}"          # eCM 91.187 / 2
-VERSION="${4:-v94c}"
+VERSION="${4:-${DELSIM_VERSION:-v94c}}"   # arg 4, else $DELSIM_VERSION env (used by the sherpa/run_generic path), else v94c
 OUT_SDST="${5:-${FADGEN}.sdst}"   # NB: append, don't strip — AFS paths contain dots (cern.ch)
 NRUN="${DELSIM_NRUN:-100001}"     # DELSIM run number = its RNG seed; vary per job in production
                                   # (export DELSIM_NRUN) so detector-sim fluctuations decorrelate.
@@ -40,7 +40,12 @@ singularity exec --bind "$SCRATCH:/host_scratch" "$SIF" cp -a /work/. /host_scra
 cp "$FADGEN" "$SCRATCH/my_events.fadgen"
 cp "$REPO/run_delsim_only.sh" "$SCRATCH/run_delsim_only.sh"; chmod +x "$SCRATCH/run_delsim_only.sh"
 
-echo "=== DELSIM inside .sif ==="
+# Optional beam-spot override -> inject into the container. APPTAINERENV_/SINGULARITYENV_ is the
+# guaranteed way to pass env across singularity exec; run_delsim_only.sh picks XYZP/XYZW up and
+# switches to its 2-pass -STITL flow. Empty -> single-pass (VERSION-default beam spot).
+if [ -n "${XYZP:-}" ]; then export APPTAINERENV_XYZP="$XYZP" SINGULARITYENV_XYZP="$XYZP"; fi
+if [ -n "${XYZW:-}" ]; then export APPTAINERENV_XYZW="$XYZW" SINGULARITYENV_XYZW="$XYZW"; fi
+echo "=== DELSIM inside .sif ===  (BS override XYZP='${XYZP:-}' XYZW='${XYZW:-}')"
 singularity exec --bind /afs:/afs --bind /eos:/eos --bind "$SCRATCH:/work" "$SIF" \
     bash -lc "cd /work && ./run_delsim_only.sh $NEVMAX $NRUN $EBEAM $VERSION"
 RC=$?

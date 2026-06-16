@@ -1,0 +1,31 @@
+# Pythia8 DEFAULT shower Z->hadrons 95d (-> /eos/.../1995/91.2/MC/95d) ISR on/off PRODUCTION -> SDST.
+# Same validated condor model as the 94c sub; the trailing "v95d 260607" args make run_default_prod.sh
+# use PROD_VER=v95d (1995/95d path, DELSIM v95d, 95d data beam-spot override) and DATE=260607.
+# Watchdog raised to 5h (the BS override adds a short DELSIM prerun). Submit: condor_submit this file
+# -append VARIANT=<isron|isroff> -append "queue <N>".
+universe                = vanilla
+executable              = generators/pythia8_key4hep/run_default_prod.sh
+
+VARIANT                 = isroff
+NEV                     = 2500
+arguments               = $(VARIANT) $(NEV) $(ClusterId) $(Process) v95d 260607
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_output_files   = ""
+MY.SendCredential       = true
+getenv                  = False
+
+requirements            = (HasSingularity =?= true)
+request_memory          = 4GB
+request_cpus            = 1
+request_disk            = 10GB
++JobFlavour             = "workday"
+
+periodic_remove         = (JobStatus == 2) && ((time() - JobCurrentStartDate) > 18000)
+
+log                     = condor_logs/default95d_$(VARIANT)_$(ClusterId).log
+output                  = condor_logs/default95d_$(VARIANT)_$(ClusterId).$(Process).out
+error                   = condor_logs/default95d_$(VARIANT)_$(ClusterId).$(Process).err
+
+# queue <N> appended at submit time

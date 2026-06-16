@@ -1,0 +1,32 @@
+# Pythia8 DEFAULT shower, Z->all hadrons, isron, 94c, ISR ON, WITH 94c data beam-spot override.
+#   5,000,000 events: 10000 evt/job x 500 jobs (the proven 10k/job config that ran the 95d 2M cleanly).
+#   v94c now sets the 94c data beam spot (XYZP=-0.29911 0.14225 -0.6121, XYZW=0.01052 0.00512 0.1349)
+#   in run_default_prod.sh -> 2-pass -STITL override. Output -> the freshly-emptied
+#   /eos/.../1994/91.2/MC/94c/SDST/pythia8_default_isron/260607 (old no-override sample was deleted).
+#   closure_gen over-generates 10% (gen 11000, DELSIM 10000). 'tomorrow' flavour + 14h watchdog (~4-5h/job).
+# Submit (repo root, lxplus):  condor_submit generators/pythia8_key4hep/condor_default_prod_94c_isron_5M.sub
+universe                = vanilla
+executable              = generators/pythia8_key4hep/run_default_prod.sh
+
+NEV                     = 10000
+arguments               = isron $(NEV) $(ClusterId) $(Process) v94c 260607
+
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_output_files   = ""
+MY.SendCredential       = true
+getenv                  = False
+
+requirements            = (HasSingularity =?= true)
+request_memory          = 4GB
+request_cpus            = 1
+request_disk            = 20GB
++JobFlavour             = "tomorrow"
+
+periodic_remove         = (JobStatus == 2) && ((time() - JobCurrentStartDate) > 50400)
+
+log                     = condor_logs/default94c5M_isron_$(ClusterId).log
+output                  = condor_logs/default94c5M_isron_$(ClusterId).$(Process).out
+error                   = condor_logs/default94c5M_isron_$(ClusterId).$(Process).err
+
+queue 500
