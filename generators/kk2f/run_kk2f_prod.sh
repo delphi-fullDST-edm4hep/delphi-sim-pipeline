@@ -7,7 +7,7 @@
 # toggles KeyISR for ISR on/off, so CEEX is preserved in BOTH the isron and isroff variants.
 #
 # Two-stage, two-container (so kk2f SDSTs are detector-level COMPARABLE to pythia8/sherpa/vincia):
-#   1) GENERATION in the kk2f .sif (kk2f_gen_only.sh: kk2f_qq.exe + fixer) -> fadgen
+#   1) GENERATION in the kk2f .sif (kk2f_gen_only.sh: kk2f_qq.exe + native DELKK record) -> fadgen
 #   2) DELSIM in delphi-sim.sif via m2_delsim_lxplus.sh -> SDST  (IDENTICAL DELSIM + the same
 #      2-pass -STITL beam-spot override used by the pythia8/sherpa samples)
 #
