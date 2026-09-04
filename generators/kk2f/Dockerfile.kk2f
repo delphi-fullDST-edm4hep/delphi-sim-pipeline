@@ -4,7 +4,9 @@ FROM docker.io/jingyucms/delphi-kk2f:v2.12
 USER root
 WORKDIR /work
 
-# Copy updated pipeline script and fixer source, then compile the fixer.
+# Copy the updated pipeline and the compatibility record validator.  Generation
+# preserves DELKK's native record directly; the validator remains for callers
+# of the historical kk2f_fadgen_fixer command.
 # Build CONTEXT = repo ROOT (CI: context: .  file: generators/kk2f/Dockerfile.kk2f);
 # kk2f_build is already baked into the base image jingyucms/delphi-kk2f.
 COPY generators/kk2f/run_kk2f_pipeline.sh /work/

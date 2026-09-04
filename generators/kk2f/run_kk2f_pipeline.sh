@@ -58,7 +58,6 @@ cp /work/kk2f_build/.KK2f_defaults .
 cp /work/kk2f_build/DelKK.inp .
 cp /work/kk2f_build/kk2f.inp fort.5
 cp -r /work/kk2f_build/input .
-cp /work/kk2f_fadgen_fixer .
 
 # Create fort.19 with UNIQUE NRUN for each job
 cat > fort.19 <<EOF
@@ -133,16 +132,18 @@ echo ""
 
 ls -lh lund.output
 
-# Step 2: Fix FADGEN format with kk2f_fadgen_fixer
-echo "=== Fixing FADGEN format for DELSIM ==="
-./kk2f_fadgen_fixer lund.output my_events.fadgen
+# Step 2: retain the native DELKK FADGEN record.  DELKKWRITE emits DELSIM's
+# binary format directly; filtering it removes status-11 decays and ancestry.
+echo "=== Preserving native DELKK FADGEN record for DELSIM ==="
+cp -- lund.output my_events.fadgen
+cmp -s lund.output my_events.fadgen || { echo "ERROR: native fadgen copy differs"; exit 1; }
 
 if [ ! -f "my_events.fadgen" ] || [ ! -s "my_events.fadgen" ]; then
-    echo "ERROR: FADGEN fixer failed"
+    echo "ERROR: native FADGEN copy failed"
     exit 1
 fi
 
-echo "✓ FADGEN format fixed"
+echo "✓ Native FADGEN record retained byte-for-byte (decay ancestry preserved)"
 ls -lh my_events.fadgen
 
 # Step 3: Set up DELPHI environment

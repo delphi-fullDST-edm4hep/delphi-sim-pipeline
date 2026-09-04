@@ -9,6 +9,7 @@ generators/kk2f/kk2f_build/*
 
 # Output directories
 output*/
+/smoke_outputs/
 condor_logs/
 **/*_prod/
 kk2f_isr_off_output/

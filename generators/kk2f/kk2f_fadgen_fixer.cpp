@@ -1,179 +1,124 @@
+// Compatibility wrapper for the native DELKK FADGEN writer.
+//
+// DELKKWRITE already writes the complete PYJETS record in the binary format
+// consumed by DELSIM.  In particular, status-11 decay records and K(I,3:5)
+// mother/daughter indices are physics information needed to retain heavy-
+// flavour ancestry.  The historical implementation of this program filtered
+// those records and zeroed every relationship.  This implementation therefore
+// performs structural validation only and copies every byte unchanged.
+
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
-#include <cmath>
+#include <string>
 #include <vector>
-#include <set>
 
-struct Particle {
-    int k[5];
-    float p[5];
-    float v[5];
-};
+namespace {
 
-bool isV0Particle(int pdg) {
-    int abs_pdg = std::abs(pdg);
-    return (abs_pdg == 310 ||    // K0_S
-            abs_pdg == 3122 ||   // Lambda
-            abs_pdg == 3112 ||   // Sigma-
-            abs_pdg == 3222 ||   // Sigma+
-            abs_pdg == 3312 ||   // Xi-
-            abs_pdg == 3322);    // Xi0
+constexpr std::int32_t kCountBytes = 4;
+constexpr std::int32_t kParticleBytes = 60;
+constexpr std::int32_t kMaxParticles = 4000;
+constexpr std::int32_t kMaxRecordBytes = kCountBytes + kMaxParticles * kParticleBytes;
+
+bool fail(const std::string& message, const std::string& temporary_output) {
+    std::cerr << "ERROR: " << message << '\n';
+    if (!temporary_output.empty()) std::remove(temporary_output.c_str());
+    return false;
 }
 
-bool isValidParticle(const Particle& p) {
-    int abs_pdg = std::abs(p.k[1]);  // Fixed: p.k[1] is the PDG code
-    
-    if (p.k[1] == 0) return false;
-    if (abs_pdg >= 81 && abs_pdg <= 99) return false;
-    if (abs_pdg >= 20000) return false;
-    if (abs_pdg > 100000) return false;
-    
-    if (p.p[3] <= 0.0) return false;
-    if (p.p[4] < 0.0) return false;
-    
-    for (int i = 0; i < 5; i++) {
-        if (!std::isfinite(p.p[i])) return false;
+bool copyValidated(const std::string& input_path, const std::string& output_path) {
+    if (input_path == output_path) {
+        std::cerr << "ERROR: input and output paths must differ\n";
+        return false;
     }
-    
-    if (std::abs(p.p[0]) > 1000.0 || std::abs(p.p[1]) > 1000.0 || 
-        std::abs(p.p[2]) > 1000.0 || p.p[3] > 1000.0) return false;
-    
-    float p2 = p.p[0]*p.p[0] + p.p[1]*p.p[1] + p.p[2]*p.p[2];
-    float e2 = p.p[3]*p.p[3];
-    if (e2 < p2 - 0.1) return false;
-    
+
+    std::ifstream input(input_path.c_str(), std::ios::binary);
+    if (!input) {
+        std::cerr << "ERROR: cannot open input: " << input_path << '\n';
+        return false;
+    }
+
+    const std::string temporary_output = output_path + ".tmp";
+    std::ofstream output(temporary_output.c_str(), std::ios::binary | std::ios::trunc);
+    if (!output) {
+        std::cerr << "ERROR: cannot open temporary output: " << temporary_output << '\n';
+        return false;
+    }
+
+    std::uint64_t events = 0;
+    std::uint64_t particles = 0;
+    bool saw_terminator = false;
+
+    while (true) {
+        std::int32_t leading_marker = 0;
+        input.read(reinterpret_cast<char*>(&leading_marker), sizeof leading_marker);
+        if (input.gcount() == 0 && input.eof()) break;
+        if (!input) return fail("truncated leading record marker", temporary_output);
+
+        // A DELKK event record consists of N followed by N copies of
+        // K(5), P(5), V(5): 4 + N * 60 bytes.  N=0 is the optional EOF record.
+        if (leading_marker < kCountBytes || leading_marker > kMaxRecordBytes ||
+            (leading_marker - kCountBytes) % kParticleBytes != 0) {
+            return fail("invalid Fortran record length " + std::to_string(leading_marker),
+                        temporary_output);
+        }
+
+        std::vector<char> payload(static_cast<std::size_t>(leading_marker));
+        input.read(payload.data(), static_cast<std::streamsize>(payload.size()));
+        if (!input) return fail("truncated record payload", temporary_output);
+
+        std::int32_t trailing_marker = 0;
+        input.read(reinterpret_cast<char*>(&trailing_marker), sizeof trailing_marker);
+        if (!input) return fail("missing trailing record marker", temporary_output);
+        if (trailing_marker != leading_marker) {
+            return fail("Fortran record markers do not match", temporary_output);
+        }
+
+        std::int32_t n = 0;
+        std::memcpy(&n, payload.data(), sizeof n);
+        if (n < 0 || n > kMaxParticles ||
+            leading_marker != kCountBytes + n * kParticleBytes) {
+            return fail("particle count is inconsistent with record length", temporary_output);
+        }
+        if (saw_terminator) {
+            return fail("data found after N=0 terminator", temporary_output);
+        }
+
+        output.write(reinterpret_cast<const char*>(&leading_marker), sizeof leading_marker);
+        output.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+        output.write(reinterpret_cast<const char*>(&trailing_marker), sizeof trailing_marker);
+        if (!output) return fail("failed while writing output", temporary_output);
+
+        if (n == 0) {
+            saw_terminator = true;
+        } else {
+            ++events;
+            particles += static_cast<std::uint64_t>(n);
+        }
+    }
+
+    if (events == 0) return fail("input contains no event records", temporary_output);
+
+    input.close();
+    output.close();
+    if (!output) return fail("failed while closing output", temporary_output);
+    if (std::rename(temporary_output.c_str(), output_path.c_str()) != 0) {
+        return fail("cannot install output: " + output_path, temporary_output);
+    }
+
+    std::cout << "Validated and copied " << events << " DELKK events (" << particles
+              << " PYJETS records) byte-for-byte; decay ancestry preserved\n";
     return true;
 }
 
+}  // namespace
+
 int main(int argc, char* argv[]) {
     if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " <input.fadgen> <output.fadgen>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <input.fadgen> <output.fadgen>\n";
         return 1;
     }
-    
-    std::ifstream infile(argv[1], std::ios::binary);
-    std::ofstream outfile(argv[2], std::ios::binary);
-    
-    if (!infile || !outfile) {
-        std::cerr << "Error opening files" << std::endl;
-        return 1;
-    }
-    
-    int events_processed = 0;
-    int total_v0_converted = 0;
-    
-    while (true) {
-        int rec_size_in;
-        infile.read(reinterpret_cast<char*>(&rec_size_in), 4);
-        if (infile.eof()) break;
-        
-        int n;
-        infile.read(reinterpret_cast<char*>(&n), 4);
-        
-        if (n == 0) {
-            outfile.write(reinterpret_cast<const char*>(&rec_size_in), 4);
-            outfile.write(reinterpret_cast<const char*>(&n), 4);
-            outfile.write(reinterpret_cast<const char*>(&rec_size_in), 4);
-            break;
-        }
-        
-        std::vector<Particle> particles(n);
-        for (int i = 0; i < n; i++) {
-            infile.read(reinterpret_cast<char*>(particles[i].k), 20);
-            infile.read(reinterpret_cast<char*>(particles[i].p), 20);
-            infile.read(reinterpret_cast<char*>(particles[i].v), 20);
-        }
-        
-        int rec_size_trail;
-        infile.read(reinterpret_cast<char*>(&rec_size_trail), 4);
-        
-        // PASS 1: Find V0 particles and mark their daughters to skip
-        std::set<int> v0_daughters_to_skip;
-        
-        for (int i = 0; i < n; i++) {
-            int status = particles[i].k[0];
-            int pdg = particles[i].k[1];
-            
-            // Find V0 with status=11 (or status=1)
-            if ((status == 11 || status == 1) && isV0Particle(pdg)) {
-                // Skip all status=1 particles in a window after this V0
-                for (int j = i + 1; j < std::min(i + 15, n); j++) {
-                    if (particles[j].k[0] >= 11) break;
-                    if (particles[j].k[0] == 1) {
-                        v0_daughters_to_skip.insert(j);
-                    }
-                }
-            }
-        }
-        
-        // PASS 2: Build output particle list
-        std::vector<Particle> valid_particles;
-        int nFinal = 0, nV0 = 0;
-        
-        for (int i = 0; i < n; i++) {
-            if (v0_daughters_to_skip.count(i)) continue;
-            if (!isValidParticle(particles[i])) continue;
-            
-            int status = particles[i].k[0];
-            
-            // Only keep status 1, 2, 4, 21, 11 (11 will be filtered later if not V0)
-            if (status != 1 && status != 2 && status != 4 && status != 21 && status != 11) {
-                continue;
-            }
-            
-            // Convert V0 particles (status=1 or status=11) to status=4
-            if ((status == 1 || status == 11) && isV0Particle(particles[i].k[1])) {
-                particles[i].k[0] = 4;
-                nV0++;
-                total_v0_converted++;
-            }
-            
-            // Filter out remaining status=11 (non-V0)
-            if (particles[i].k[0] == 11) continue;
-            
-            // Zero out mother/daughter indices
-            particles[i].k[2] = 0;
-            particles[i].k[3] = 0;
-            particles[i].k[4] = 0;
-            
-            valid_particles.push_back(particles[i]);
-            
-            if (particles[i].k[0] == 1 || particles[i].k[0] == 4) {
-                nFinal++;
-            }
-        }
-        
-        if (nFinal < 2) {
-            std::cout << "Event " << (events_processed + 1) << " REJECTED: Only " 
-                      << nFinal << " final state particles" << std::endl;
-            events_processed++;
-            continue;
-        }
-        
-        int n_out = valid_particles.size();
-        
-        std::cout << "Event " << (events_processed + 1) << ": " << n << " → " 
-                  << n_out << " particles (" << nFinal << " final";
-        if (nV0 > 0) std::cout << ", " << nV0 << " V0";
-        std::cout << ")" << std::endl;
-        
-        int rec_size_out = 4 + n_out * 60;
-        outfile.write(reinterpret_cast<const char*>(&rec_size_out), 4);
-        outfile.write(reinterpret_cast<const char*>(&n_out), 4);
-        
-        for (const auto& p : valid_particles) {
-            outfile.write(reinterpret_cast<const char*>(p.k), 20);
-            outfile.write(reinterpret_cast<const char*>(p.p), 20);
-            outfile.write(reinterpret_cast<const char*>(p.v), 20);
-        }
-        
-        outfile.write(reinterpret_cast<const char*>(&rec_size_out), 4);
-        
-        events_processed++;
-    }
-    
-    std::cout << "\nProcessed " << events_processed << " events" << std::endl;
-    std::cout << "V0 particles converted to status=4: " << total_v0_converted << std::endl;
-    
-    return 0;
+    return copyValidated(argv[1], argv[2]) ? 0 : 1;
 }

@@ -326,7 +326,7 @@ Sherpa ISR variants; beam half 45.6). Pick deliberately.
 | herwig | `:Stable Stable` (Herwig decays by default!) | — | — |
 | whizard | PYTHIA6 `MDCY(C<KF>,1)=0` | — | — |
 | kkmc | n/a (broken/parton-level) | — | — (none) |
-| kk2f | in `kk2f_fadgen_fixer` | `.KK2f_defaults` line 49 (`KeyISR`) | docker universe (deferred) |
+| kk2f | native DELKK record (V0 already `K=4`) | `.KK2f_defaults` line 49 (`KeyISR`) | docker universe (deferred) |
 
 ### 5.1 Native Pythia8 (`generators/pythia8/`)
 
@@ -456,7 +456,7 @@ generators/kkmc/generate.sh [nevents=20] [ecms=91.187] [outdir=$PWD/kkmc_run]
 
 ### 5.7 Legacy KK2F (`generators/kk2f/`) — deferred, docker universe
 
-Fortran pipeline: `kk2f_qq.exe` → `lund.output` → `kk2f_fadgen_fixer` → `my_events.fadgen` → DELSIM.
+Fortran pipeline: `kk2f_qq.exe` → native DELKK `lund.output` → `my_events.fadgen` → DELSIM.
 Runs in the **docker** image `jingyucms/delphi-kk2f-pipeline`.
 
 ```bash
@@ -464,14 +464,20 @@ run_kk2f_pipeline.sh [num_events=3000] [job_id=$(date)] [output_dir=/work/output
                      [isr_mode=on] [energy=91.187]
 ```
 
-- **ISR toggle** edits **only line 49 (`KeyISR`) of `.KK2f_defaults`** (`on`→1 EEX, `off`→0). **You
+- **ISR toggle** edits **only line 49 (`KeyISR`) of `.KK2f_defaults`** (`on`→1, `off`→0); the
+  matrix-element scheme remains CEEX (`KeyGPS=1`, `KeyINT=2`). **You
   must delete the integration-grid cache `fort.51`/`fort.52` (also `fort.61/62`, `lund.output`,
   `kk2f.log`) before each run when switching ISR mode**, else the stale grid is reused.
 - The `energy` arg drives **KK2F only** — DELSIM `EBEAM` is **hardcoded 45.625** and `VERSION` is
   hardcoded `v94c`. DELSIM runs on **90 %** of generated events (different buffer logic from pythia8).
-- `kk2f_fadgen_fixer <in.fadgen> <out.fadgen>` re-applies the same V0 set + validity filter as the
-  pythia8 path, operating directly on the Fortran-record binary.
-- Validated σ (from comments): ISR ON ~30 nb / OFF ~12 nb at the Z-pole.
+- `DELKKWRITE` already emits DELSIM's native Fortran-record format, including PYJETS status-11
+  decay records and `K(I,3:5)` mother/daughter indices.  These are copied byte-for-byte.  Do not
+  filter the file before DELSIM: the former fixer dropped the heavy-flavour decay tree.  The
+  retained `kk2f_fadgen_fixer` command is now a compatibility validator/pass-through.
+- Deployment caveat: the published v2.16 SIF predates this change and still contains the destructive
+  fixer and old standalone entrypoint. `run_kk2f_prod.sh` is safe because it explicitly executes the
+  host-side `kk2f_gen_only.sh`; do not call the baked fixer/entrypoint until a new image is built.
+- Z-pole cross-section sanity targets: ISR ON ~30 nb / OFF ~42 nb.
 - All `condor_kk2f*.sub` use the **deprecated `universe=docker`** model and write to AFS
   (`/afs/.../output`), not EOS. `condor_kk2f_test.sub` passes a stale `.tit` as the ISR-mode arg
   (incompatible with the current "on"/"off" interface). KK2F large production is **deferred**.
