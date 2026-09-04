@@ -749,6 +749,32 @@ It pulls `docker://jingyucms/delphi-sim:latest`, **verifies the baked artifacts*
 
 ## 10. Output formats & converting to ROOT
 
+### EDM4hep conversion and FATMEN inputs
+
+`convert_to_edm4hep.sh` is the pipeline entry point for the merged
+[`delphi-edm4hep`](https://github.com/delphi-fullDST-edm4hep/delphi-edm4hep)
+converter. It accepts exactly one of:
+
+```bash
+# A simulation shortDST produced by this repository
+./convert_to_edm4hep.sh --input output/simana_42.sdst \
+  --output output/simana_42.edm4hep.root --sample mc
+
+# A DELPHI FATMEN nickname (resolved by PHDST/fatfind)
+./convert_to_edm4hep.sh --nickname short94_c2/c1-10 \
+  --output short94_c2_c1-10.edm4hep.root --sample data
+
+# A PDLINPUT file prepared by fatfind
+./convert_to_edm4hep.sh --pdl input.pdl \
+  --output selected.edm4hep.root --sample data
+```
+
+Set `DELPHI_EDM4HEP_BIN` or pass `--edmbin` to select the directory containing
+`delphi_sdst_pass` and `delphi_btag_check`. The checker runs on every output by
+default. The merged converter always publishes both the stored BTG payload and
+the recalculated AABTAG payload; the old pipeline-specific `--btag recalc`
+steering is deliberately not exposed here.
+
 DELSIM/DELANA produce two complementary files per job; **you want both for a complete refit.**
 
 - **`simana_<job>.sdst` — DELPHI shortDST** (~150 kB / 30 events). Used by standard DELPHI analyses;
