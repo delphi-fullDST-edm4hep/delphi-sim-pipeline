@@ -169,17 +169,26 @@ echo "=== Starting Pythia ==="
 # to reject events containing those |PDG|; empty = no veto.
 VETO_PDG_CSV="${VETO_PDG_CSV:-}"
 
+# Retry budget as a multiple of the requested event count. The default of 3 is
+# for the unbiased run; a veto that keeps only a small fraction of events needs
+# far more, and pythia8_generate now FAILS rather than writing a short fort.26.
+# Measured acceptances within the Z->bb lane, for sizing:
+#   VETO_PDG_CSV=521                        -> 32.8%  (factor ~10)
+#   VETO_PDG_CSV=511,521                    ->  2.1%  (factor ~150)
+#   VETO_PDG_CSV=511,521,5122,5132,5232,5332 -> 0.98% (factor ~300)
+MAX_ATTEMPT_FACTOR="${MAX_ATTEMPT_FACTOR:-3}"
+
 # Step 2: Generate events with optional config file
 echo "Step 2: Generating $PYTHIA_EVENTS events (DELSIM target $NUM_EVENTS + buffer $PYTHIA_BUFFER)..."
-[ -n "$VETO_PDG_CSV" ] && echo "B-hadron veto: $VETO_PDG_CSV"
+[ -n "$VETO_PDG_CSV" ] && echo "B-hadron veto: $VETO_PDG_CSV (attempt factor $MAX_ATTEMPT_FACTOR)"
 if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
     echo "Using config file: $CONFIG_FILE"
     cat "$CONFIG_FILE"
     echo "--- End of config file ---"
-    ./pythia8_generate $PYTHIA_EVENTS "$CONFIG_FILE" "$VETO_PDG_CSV"
+    ./pythia8_generate $PYTHIA_EVENTS "$CONFIG_FILE" "$VETO_PDG_CSV" "$MAX_ATTEMPT_FACTOR"
 else
     echo "Using default configuration"
-    ./pythia8_generate $PYTHIA_EVENTS "" "$VETO_PDG_CSV"
+    ./pythia8_generate $PYTHIA_EVENTS "" "$VETO_PDG_CSV" "$MAX_ATTEMPT_FACTOR"
 fi
 
 # ADD DEBUGGING HERE:
