@@ -330,10 +330,17 @@ int main(int argc, char* argv[]) {
         config_file = argv[2];
     }
     
-    // CLOSURE TEST: fixed seed for reproducibility. Both fort.26 and the HepMC3
-    // are produced from the SAME events in this one run, so the seed only picks
-    // which events — it does not affect the A-vs-B comparison.
+    // CLOSURE TEST: fixed seed 12345 for reproducibility. Both fort.26 and the
+    // HepMC3 are produced from the SAME events in this one run, so the seed only
+    // picks which events — it does not affect the A-vs-B comparison.
+    // PRODUCTION: set the env var PYTHIA_SEED to a per-job value so parallel
+    // condor jobs generate independent events (default stays 12345, so the
+    // closure test is unchanged).
     unsigned long seed = 12345;
+    if (const char* env_seed = std::getenv("PYTHIA_SEED")) {
+        const unsigned long s = std::strtoul(env_seed, nullptr, 10);
+        if (s > 0) seed = s % 900000000UL;   // keep within Pythia8's seed range
+    }
     
     Pythia pythia;
     
