@@ -2,21 +2,27 @@
 # Self-contained b-tagging-production job: generate Z->bb (Pythia8/key4hep) -> hepmc2fadgen
 # (status 11 + V, the fix branch) -> DELSIM (.sif, LUDECV switch) -> edm4hep, copy edm4hep to EOS.
 # Runs on a condor worker (needs CVMFS + singularity). All work in worker scratch; only the
-# edm4hep is kept. Args: <nev> <proc> <ludecv TRUE|FALSE> <eos_dest> <seed_base>
+# edm4hep is kept.
+# Args: <nev> <proc> <ludecv TRUE|FALSE> <eos_dest> <seed_base> [config=config_z_bb.txt]
+# The optional 6th argument selects the Pythia config: a bare name is looked up in generators/pythia8/, an absolute
+# path is used as given. Output is <label>_<seed>.edm4hep.root, label from the config (config_z_cc.txt -> cc).
 set -uo pipefail
 NEV="${1:?nev}"; PROC="${2:?process}"; LUDECV="${3:?TRUE|FALSE}"; DEST="${4:?eos dest}"; BASE="${5:?seed base}"
+CFGARG="${6:-config_z_bb.txt}"
 SEED=$(( BASE + PROC ))
 REPO=/afs/cern.ch/work/z/zhangj/delphi-pythia8-pipeline
 SIF=$REPO/delphi-sim.sif
 CONV=/afs/cern.ch/work/z/zhangj/edm4hep_build_prod/delphi_sdst_pass
-CFG=$REPO/generators/pythia8/config_z_bb.txt
+case "$CFGARG" in /*) CFG="$CFGARG" ;; *) CFG="$REPO/generators/pythia8/$CFGARG" ;; esac
+[ -s "$CFG" ] || { echo "FATAL: Pythia config not found: $CFG"; exit 27; }
+LABEL=$(basename "$CFG" .txt); LABEL=${LABEL#config_z_}; LABEL=${LABEL#config_}
 KEY4HEP=/cvmfs/sw.hsf.org/key4hep/setup.sh
 export PATH=/cvmfs/oasis.opensciencegrid.org/mis/apptainer/bin:$PATH
 command -v singularity >/dev/null 2>&1 || { command -v apptainer >/dev/null 2>&1 || { echo "FATAL: no singularity/apptainer"; exit 20; }; }
 
-OUT=bb_${SEED}.edm4hep.root
+OUT=${LABEL}_${SEED}.edm4hep.root
 W="${_CONDOR_SCRATCH_DIR:-$(mktemp -d /tmp/btag.XXXXXX)}/btag_$SEED"; mkdir -p "$W"; cd "$W" || exit 21
-echo "=== btag job: nev=$NEV seed=$SEED ludecv=$LUDECV dest=$DEST host=$(hostname) $(date) ==="
+echo "=== btag job: nev=$NEV seed=$SEED ludecv=$LUDECV cfg=$(basename $CFG) dest=$DEST host=$(hostname) $(date) ==="
 
 # 1) generate NEV+10% events -> events.hepmc3 (key4hep sourced in a child shell only)
 NGEN=$(( NEV + (NEV+9)/10 ))
@@ -53,7 +59,7 @@ mkdir -p "$DEST"
 cp "$W/$OUT" "$DEST/$OUT" && echo "PUBLISHED $DEST/$OUT ($sz B) $(date)" || { echo "FATAL: EOS copy failed -> $DEST/$OUT"; exit 26; }
 # 5b) keep the GEN record (the fadgen fed to DELSIM; first NEV events = the simulated ones), gzipped
 mkdir -p "$DEST/gen"
-if gzip -c my_events.fadgen > gen.fadgen.gz && cp gen.fadgen.gz "$DEST/gen/bb_${SEED}.fadgen.gz"; then
-  echo "  GEN record: $DEST/gen/bb_${SEED}.fadgen.gz ($(stat -c%s gen.fadgen.gz) B)"
+if gzip -c my_events.fadgen > gen.fadgen.gz && cp gen.fadgen.gz "$DEST/gen/${LABEL}_${SEED}.fadgen.gz"; then
+  echo "  GEN record: $DEST/gen/${LABEL}_${SEED}.fadgen.gz ($(stat -c%s gen.fadgen.gz) B)"
 else echo "WARNING: GEN record copy failed (edm4hep already published)"; fi
 cd /; rm -rf "$W"
