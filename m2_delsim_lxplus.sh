@@ -45,7 +45,9 @@ cp "$REPO/run_delsim_only.sh" "$SCRATCH/run_delsim_only.sh"; chmod +x "$SCRATCH/
 # switches to its 2-pass -STITL flow. Empty -> single-pass (VERSION-default beam spot).
 if [ -n "${XYZP:-}" ]; then export APPTAINERENV_XYZP="$XYZP" SINGULARITYENV_XYZP="$XYZP"; fi
 if [ -n "${XYZW:-}" ]; then export APPTAINERENV_XYZW="$XYZW" SINGULARITYENV_XYZW="$XYZW"; fi
-echo "=== DELSIM inside .sif ===  (BS override XYZP='${XYZP:-}' XYZW='${XYZW:-}')"
+# LUDECV (default TRUE inside run_delsim_only.sh): pass an explicit override (e.g. LUDECV=FALSE) through.
+if [ -n "${LUDECV:-}" ]; then export APPTAINERENV_LUDECV="$LUDECV" SINGULARITYENV_LUDECV="$LUDECV"; fi
+echo "=== DELSIM inside .sif ===  (BS override XYZP='${XYZP:-}' XYZW='${XYZW:-}'; LUDECV='${LUDECV:-TRUE (default)}')"
 singularity exec --bind /afs:/afs --bind /eos:/eos --bind "$SCRATCH:/work" "$SIF" \
     bash -lc "cd /work && ./run_delsim_only.sh $NEVMAX $NRUN $EBEAM $VERSION"
 RC=$?
