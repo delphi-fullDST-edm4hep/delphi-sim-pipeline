@@ -236,13 +236,21 @@ then a trailing `int record_size`. `record_size = 4 + N*60`. The file ends with 
 
 **Encoding rules a manual must state:**
 
-- **`V[5]` (vertex/lifetime) is written as all zeros on purpose.** DELSIM ignores the input
-  production vertex (regenerates it from the beam spot via `SXBEAP`) and the input proper lifetime
-  (uses its own `VTAU`/`UPTAU`). Filling real vertices would be silently discarded.
+- **`V[1..4]`** = the HepMC3 production vertex (mm) and time of every particle. DELSIM still places
+  the *primary* vertex itself (beam spot, `SXBEAP`, see the `XYZP`/`XYZW` override in §6.2), but with
+  the title card **`LUDECV TRUE`** (default in `run_delsim_only.sh`) its decay-vertex routine `SXSDK`
+  takes the decay length of a `K=11` particle from `V(first daughter) − V(parent)` instead of drawing a
+  decay time from its own lifetime table. Without `LUDECV` the V array is ignored.
 - **Status mapping** (HepMC3 status → LUJETS `K(,1)`):
   - HepMC3 **1** (final) → `K=1`, **except** V0 particles (see below) which final-state → **`K=4`**
     so DELSIM does the displaced decay.
-  - **Everything else** (HepMC3 beam=4, decayed=2, documentation) → **`K=21`**.
+  - HepMC3 **decayed hadrons** (`|pdg| ≥ 100`, not in the V0 set) **and τ** that keep at least one
+    valid daughter → **`K=11`** (JETSET "decayed"). This is what makes DELSIM create a decay vertex
+    for them: the DELSIM cradle skips documentation entries ("No ST banks for K(I,1)=21" in
+    `SXSHST`), so a `K=21` B or D meson gets no vertex and its decay products **start at the primary
+    vertex** — every production made before 2026-09 (pythia8, sherpa, vincia, the flavour-split
+    pythia8_bb/cc streams) has zero B/D/τ decay length in SIM for this reason.
+  - **Everything else** (HepMC3 beam=4, partons, Z, documentation) → **`K=21`**.
   - **Critical caveat:** HepMC3 "decayed" (status 2) must **NOT** be mapped to LUJETS `K=2`. In
     JETSET `K(,1)=2` means "final, last of a colour singlet" (a *tracked* code); mislabeling a
     decayed Z/parton as 2 makes DELSIM reject the whole event (reads 0 input events). HepMC3 status
@@ -260,6 +268,15 @@ then a trailing `int record_size`. `record_size = 4 + N*60`. The file ends with 
   `(4000,5)`); fewer than 2 final-state (`K1∈{1,4}`) particles.
 - Mother/daughter links (`K[2]`, `K[3]`, `K[4]`) are remapped to 1-based output indices, so the full
   gen tree (b-tagging truth) propagates to the DST SH-banks.
+- **Lifetime model, measured on DELSIM output (2026-09):** with `K=11` alone DELSIM redraws the decay
+  time from its own table — the correction cradle sets `VTAU` to a flat **1.6 ps for every b hadron**
+  (0.48 mm for B⁺, B⁰, B_s, Λ_b, B_c alike) and 1990 values for charm. With `K=11` **and**
+  `LUDECV TRUE` the SIM decay lengths equal the generator's per species, hadron by hadron (the
+  official kk2f4146 production has the flat 1.6 ps). Note that the generator's values are Pythia 8.315's
+  particle table, not PDG 2024, for B_s (0.439 vs 0.456 mm), B⁰ (0.459 vs 0.455), Ξ_b (0.364 vs
+  0.471/0.443) and B_c (0.138 vs 0.153); set `531:tau0 = 0.4557` etc. in the Pythia config if wanted.
+  The converter prints how many particles it tagged `K=11` and how many have a displaced first
+  daughter, and warns if none do.
 
 A copy of the converter is baked into the image at `/work/hepmc2fadgen` (used by `verify_sif.sh`).
 
@@ -548,6 +565,20 @@ runsim -VERSION <version> -LABO CERN -NRUN <nrun> -EBEAM <ebeam> -NEVMAX <nevmax
 
 Outputs `simana.sdst`, `simana.fadana` (and the large `simana.fadsim`, normally cleaned up).
 
+Two environment switches, both passed through `m2_delsim_lxplus.sh` into the container
+(`APPTAINERENV_*`), select the 2-pass title flow (prerun to fill `simlocal.title`, `sed` the cards
+in, re-run with `-STITL`):
+
+- **`LUDECV`** (default `TRUE`): inserts `LUDECV   TRUE` after `JSHORT` so DELSIM takes the decay
+  vertices of `K=11` particles from the generator's V array (§4.1). `LUDECV=FALSE` falls back to
+  DELSIM's own lifetime table (flat 1.6 ps for beauty).
+- **`XYZP="x y z"` / `XYZW="wx wy wz"`** (cm): the beam-spot centroid and widths. **Always set them
+  for physics samples.** DELSIM's built-in v94c beam spot is not the data one — the reconstructed
+  primary vertex lands at about (−1.0, 0.0, −8.0) mm with a 0.6 mm wide spot (the official kk2f4146
+  MC sits there too), versus the 94c data spot `XYZP="-0.29911 0.14225 -0.6121"
+  XYZW="0.01052 0.00512 0.1349"` (95d: `"-0.32026 0.11079 -0.7589"` / `"0.01208 0.01219 0.30102"`).
+  All `*_prod.sh` drivers and `btag_condor/run_btag_job.sh` export these.
+
 > **EBEAM mismatch to note:** `run_delsim_only.sh`'s positional default is **45.625**, but
 > `m2_delsim_lxplus.sh` always passes **45.5935** explicitly, so the in-container default is only seen
 > if you call `run_delsim_only.sh` directly. Pick deliberately.
@@ -703,6 +734,50 @@ DATE=val_$(date +%H%M%S) \
 > Don't validate by `nohup`-ing a long DELSIM run on an lxplus login node — interactive jobs get
 > reaped. Use `condor_submit ... queue 1` instead.
 
+### 8.8 b-tagging Z→bb production straight to edm4hep (`btag_condor/run_btag_job.sh`)
+
+A self-contained worker job for lifetime-correct Z→bb samples: `closure_gen` (Pythia 8, key4hep,
+seed from `PYTHIA_SEED`) → `hepmc2fadgen` (host-side binary from this repo) → DELSIM in the shared
+`.sif` via `m2_delsim_lxplus.sh` with `LUDECV` and the 94c data beam spot → `delphi_sdst_pass`
+(delphi-edm4hep converter) → copy to EOS. It keeps the gzipped FADGEN record actually fed to DELSIM
+under `<dest>/gen/` so GEN-vs-SIM comparisons on the same events stay possible.
+
+```bash
+# args: <nev> <process> <LUDECV TRUE|FALSE> <eos_dest> <seed_base>   (seed = base + process)
+condor_submit -name bigbird25.cern.ch <<'EOF'
+universe                = vanilla
+executable              = btag_condor/run_btag_job.sh
+arguments               = 5000 $(Process) TRUE /eos/experiment/eealliance/Users/<you>/edm4hepSimBTagging/fix1_fix2_ludecv 1000000
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+transfer_output_files   = ""
+MY.SendCredential       = true
+getenv                  = False
+requirements            = (HasSingularity =?= true)
+request_memory          = 4GB
+request_cpus            = 1
+request_disk            = 15GB
++JobFlavour             = "tomorrow"
+output                  = /afs/cern.ch/work/<u>/<you>/btag_condorOut/$(ClusterId)_$(Process).out
+error                   = /afs/cern.ch/work/<u>/<you>/btag_condorOut/$(ClusterId)_$(Process).err
+log                     = /afs/cern.ch/work/<u>/<you>/btag_condorOut/$(ClusterId).log
+queue 200
+EOF
+```
+
+Validate with `arguments = 300 0 TRUE <dest>/_validate 999000` and `queue 1` first (~17 min); a
+5000-event job takes 2.3–5 h. The wrapper needs `$REPO/hepmc2fadgen` and
+`generators/pythia8_key4hep/closure_gen` built (`./build_key4hep.sh`), and the converter binary
+path (`CONV=`) adjusted to your build. Reference production (2026-09-06, 1M events fix1+fix2, 100k
+fix1-only, plus the official kk2f4146_qqpy 94c stream converted to edm4hep):
+`/eos/experiment/eealliance/Users/zhangj/edm4hepSimBTagging/` (README inside).
+
+Two things to know when using the output: DELSIM occasionally skips a generator event (0–2 per
+5000), so align generator records with the edm4hep header parameter `sDST_EVT_eventNumber`
+(= 1-based FADGEN record index), not by position; and the converter's absolute
+`sDST_LUJ_GenParticles.vertex` coordinates carry a units bug (true mm + the same in cm), so use
+vertex *differences* (in cm, ×10 → mm) only.
+
 ---
 
 ## 9. Container image & CI
@@ -810,6 +885,9 @@ container/run_singularity.sh <n_events=200> <job_id=$(date)> <out_dir=$PWD/out> 
 | `build_key4hep.sh` dies immediately / env not picked up | `nounset` vs key4hep's unset-var expansion, OR sourcing key4hep through a pipe | Source key4hep **directly** with `set +u` (the script does this — don't `source ... | tail`). |
 | DELSIM rejects every event (reads 0 input) | HepMC3 status 2 mapped to LUJETS `K=2` (a tracked code) | Never map status 2 → `K=2`; the converter maps decayed → `K=21`. |
 | V0 displaced vertices missing in the DST | generator decayed the V0 set itself | Make the V0 set `{310,3122,3112,3222,3312,3322}` final-state (status 1); audit with `hepmc3_audit.py`. |
+| **B/D/τ decay products start at the primary vertex** (b-tag probability identical for b and non-b events) | decayed hadrons handed to DELSIM as `K=21` (documentation) — the cradle creates no vertex for them | Use the current `hepmc2fadgen` (`K=11` + V array) and `LUDECV TRUE` (§4.1, §6.2). Every sample made before 2026-09 has this. |
+| All b hadrons have the same 0.48 mm decay length in SIM | `K=11` without `LUDECV`: DELSIM's cradle `VTAU` is a flat 1.6 ps for beauty | `LUDECV=TRUE` (default) — or accept the table if you only need "some" lifetime. |
+| Reco primary vertex not at the data beam spot | DELSIM's built-in beam spot (also in the official kk2f4146 MC) | Export `XYZP`/`XYZW` (§6.2). |
 | `compare_fadgen.py` shows only `2`↔`21` diffs | benign intermediate status labels | Not a failure — PASS requires identical final-state set + parentage, which these don't break. |
 | Whizard input flagged `beams (status 4): MISSING` | Whizard marks beams status 3 | Expected; converter still places them as `K=21` — verify placement before trusting. |
 | `.sdst` filename truncated at a dot (e.g. AFS path) | naive extension stripping | `m2_delsim_lxplus.sh` **appends** `.sdst` (never strips) because AFS paths contain dots. |
