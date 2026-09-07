@@ -505,11 +505,27 @@ int main(int argc, char* argv[]) {
     
     int events_generated = 0;  // Count how many PYTHIA generated
     int events_accepted = 0;   // Count how many we accepted
-    int max_attempts = target_events * 3;  // Maximum attempts
-    
+
+    // [max_attempt_factor] bounds the retry budget as target_events * factor.
+    // The historical value of 3 is right for an UNBIASED run, where nearly
+    // every generated event is accepted. It is far too small once the veto
+    // hook is enabled: enriching a B_s pair sample accepts ~0.98% of Z->bb
+    // events, i.e. ~102 attempts per kept event, so a 3x budget quietly writes
+    // ~3% of what was asked for instead of failing. Configurable so the
+    // unbiased default is unchanged.
+    int attempt_factor = 3;
+    if (argc > 4) {
+        const int f = std::atoi(argv[4]);
+        if (f > 0) attempt_factor = f;
+    }
+    const long max_attempts = static_cast<long>(target_events) * attempt_factor;
+
     std::cout << "Attempting to generate " << target_events << " validated events..." << std::endl;
-    
-    for (int attempt = 0; attempt < max_attempts && events_accepted < target_events; ++attempt) {
+    std::cout << "Attempt budget: " << max_attempts
+              << " (" << attempt_factor << "x target)" << std::endl;
+
+    long attempt = 0;
+    for (; attempt < max_attempts && events_accepted < target_events; ++attempt) {
         if (!pythia.next()) {
             std::cout << "PYTHIA generation failed on attempt " << (attempt + 1) << std::endl;
             continue;
@@ -536,6 +552,33 @@ int main(int argc, char* argv[]) {
         std::cout << "  Rejection rate: " << std::fixed << std::setprecision(1) 
                   << (100.0 * (events_generated - events_accepted) / events_generated) << "%" << std::endl;
     }
-    
+    std::cout << "  Attempts used: " << attempt << " / " << max_attempts << std::endl;
+    if (attempt > 0) {
+        std::cout << "  Acceptance: " << std::fixed << std::setprecision(3)
+                  << (100.0 * events_accepted / attempt) << "%" << std::endl;
+    }
+
+    // Fail closed on a shortfall. A short fort.26 is not a smaller sample, it
+    // is a WRONG one: the DELSIM stage and the campaign gates downstream both
+    // expect exactly the requested event count, and a silent shortfall would
+    // only be caught much later, after the expensive simulation had run.
+    if (events_accepted < target_events) {
+        std::cerr << std::endl
+                  << "ERROR: only " << events_accepted << " of " << target_events
+                  << " events accepted after " << attempt << " attempts." << std::endl;
+        std::cerr << "       Raise the attempt factor (currently " << attempt_factor
+                  << ") via MAX_ATTEMPT_FACTOR." << std::endl;
+        if (attempt > 0) {
+            const double acc = static_cast<double>(events_accepted) / attempt;
+            if (acc > 0) {
+                std::cerr << "       Measured acceptance " << std::fixed
+                          << std::setprecision(3) << (100.0 * acc)
+                          << "% implies a factor of at least "
+                          << static_cast<long>(2.0 / acc) << "." << std::endl;
+            }
+        }
+        return 1;
+    }
+
     return 0;
 }
