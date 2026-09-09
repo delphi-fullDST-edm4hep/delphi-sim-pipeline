@@ -10,6 +10,8 @@
 # Environment knobs (all optional):
 #   LABEL          override the label derived from the config (file names <LABEL>_<seed>.*)
 #   REPO, SIF, CONV  pipeline checkout, delphi-sim .sif, delphi_sdst_pass binary   [AFS work area / $REPO/delphi-sim.sif / EOS-staged combined-tag binary]
+#                  For > ~100 concurrent jobs put the .sif on EOS (SIF=/eos/.../_bin/delphi-sim.sif): 1200 workers staging
+#                  it from AFS stalled the AFS server (jobs held with errno 110 on the log transfer).
 #   REUSE_GEN      1: if $DEST/gen/<LABEL>_<seed>.fadgen.gz exists, feed it to DELSIM instead of regenerating
 #                  (same events as the previous production, independent of the generator build)          [1]
 #   BEAMSPOT_MODE  per-job: XYZP/XYZW of a 94c data run drawn by seed (beamspot/beamspot_for_seed.py);
@@ -34,6 +36,10 @@ export SIF
 
 OUT=${LABEL}_${SEED}.edm4hep.root
 W="${_CONDOR_SCRATCH_DIR:-$(mktemp -d /tmp/btag.XXXXXX)}/btag_${LABEL}_$SEED"; mkdir -p "$W"; cd "$W" || exit 21
+# Own log, copied to $DEST/logs/ on every exit (success or FATAL): the access point writing condor's stdout/stderr to AFS
+# timed out for ~1000 concurrent jobs, so the submit script sends those to /dev/null and this is the record.
+LOGF="$W/job.log"; exec >> "$LOGF" 2>&1
+trap 'rc=$?; mkdir -p "$DEST/logs" 2>/dev/null; cp -f "$LOGF" "$DEST/logs/${LABEL}_${SEED}.log" 2>/dev/null; cd /; rm -rf "$W"; exit $rc' EXIT
 echo "=== btag job: label=$LABEL nev=$NEV seed=$SEED ludecv=$LUDECV dest=$DEST host=$(hostname) $(date) ==="
 echo "  repo=$REPO sif=$SIF conv=$CONV cfg=$CFG reuse_gen=$REUSE_GEN beamspot=$BEAMSPOT_MODE keep_sdst=$KEEP_SDST"
 
@@ -73,9 +79,11 @@ grep -E '^(XYZP|XYZW)[[:space:]]' delsim.log | head -2 | sed 's/^/  title: /'
 
 # 4) SDST -> edm4hep (delphi + key4hep in a child shell); the converter needs its own cwd (PDLINPUT, fort.*)
 mkdir -p conv && ( set +u; cd conv; source /cvmfs/delphi.cern.ch/setup.sh >/dev/null 2>&1; source "$KEY4HEP" -r 2026-04-08 >/dev/null 2>&1; set -u
-  "$CONV" "$W/out.sdst" "$W/$OUT" > ../conv_edm.log 2>&1 )
+  "$CONV" "$W/out.sdst" "$W/$OUT" > ../conv_edm.log 2>&1 ); crc=$?
 sz=$(stat -c%s "$W/$OUT" 2>/dev/null || echo 0)
+[ "$crc" -eq 0 ] || { echo "FATAL: converter exit code $crc"; tail -25 conv_edm.log; exit 25; }
 [ "$sz" -gt 500000 ] || { echo "FATAL: edm4hep too small ($sz B)"; tail -25 conv_edm.log; exit 25; }
+grep -q "PHDST-I-PHEND, Processed" conv_edm.log || { echo "FATAL: converter did not reach PHEND"; tail -25 conv_edm.log; exit 25; }
 echo "  edm4hep: $OUT = $sz B; $(grep -o 'Processed *[0-9]* Selected records' conv_edm.log | tail -1); combined tag: $(grep -c 'Start of Combined tagging' conv_edm.log)"
 
 # 5) publish to EOS (worker has forwarded token via SendCredential)
@@ -92,4 +100,3 @@ if [ "$KEEP_SDST" = 1 ]; then
   mkdir -p "$DEST/sdst"
   cp "$W/out.sdst" "$DEST/sdst/${LABEL}_${SEED}.sdst" && echo "  SDST kept: $DEST/sdst/${LABEL}_${SEED}.sdst ($(stat -c%s "$W/out.sdst") B)" || echo "WARNING: SDST copy failed"
 fi
-cd /; rm -rf "$W"
