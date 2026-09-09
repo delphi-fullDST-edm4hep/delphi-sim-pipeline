@@ -6,6 +6,7 @@
 #   njobs   : submit procs 0..njobs-1 (default: the sample's full job count)
 #   missing : submit only the procs whose edm4hep is not on EOS and which are not queued/running in condor
 # Per-run knobs are passed with `condor_submit -append`, no personal .sub files are kept in the repo.
+# EXTRA_ENV="DELSIM_NRUN_OFFSET=1" adds job environment (e.g. to re-run a seed whose DELSIM hangs in one event).
 # The .sif is read from EOS (SIF env) and condor's stdout/stderr go to /dev/null: the job writes its own log to
 # <dest>/logs/ (1200 jobs reading the AFS .sif + the AP writing 1200 .out files to AFS held 959 jobs, errno 110).
 set -euo pipefail
@@ -42,7 +43,7 @@ condor_submit -name bigbird25.cern.ch \
   -append "universe = vanilla" \
   -append "executable = $REPO/btag_condor/run_btag_job.sh" \
   -append "arguments = $ARGS" \
-  -append "environment = \"REPO=$REPO SIF=$SIF REUSE_GEN=1 BEAMSPOT_MODE=per-job KEEP_SDST=1\"" \
+  -append "environment = \"REPO=$REPO SIF=$SIF REUSE_GEN=1 BEAMSPOT_MODE=per-job KEEP_SDST=1 ${EXTRA_ENV:-}\"" \
   -append "should_transfer_files = YES" \
   -append "when_to_transfer_output = ON_EXIT" \
   -append "transfer_output_files = \"\"" \

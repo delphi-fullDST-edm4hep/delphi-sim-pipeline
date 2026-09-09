@@ -68,8 +68,12 @@ case "$BEAMSPOT_MODE" in
   *)       echo "FATAL: BEAMSPOT_MODE=$BEAMSPOT_MODE (per-job|global|env)"; exit 27 ;;
 esac
 [ -n "${XYZP:-}" ] && [ -n "${XYZW:-}" ] || { echo "FATAL: beam spot not set"; cat beamspot.txt; exit 27; }
-echo "XYZP=\"$XYZP\" XYZW=\"$XYZW\" $(cat beamspot.txt)" > beamspot.txt
-export XYZP XYZW LUDECV DELSIM_NRUN=$(( 3000 + SEED % 88000 ))
+# DELSIM run number = RNG seed. DELSIM_NRUN_OFFSET (default 0) shifts it: the escape hatch for a seed whose detector
+# simulation hangs in one event (GEANT loop; 3 of 1200 jobs in the 2026-09 re-simulation) — the generator events stay
+# the same, only the detector random sequence changes. Recorded in the .beamspot sidecar.
+DELSIM_NRUN=$(( 3000 + (SEED + ${DELSIM_NRUN_OFFSET:-0}) % 88000 ))
+echo "XYZP=\"$XYZP\" XYZW=\"$XYZW\" NRUN=$DELSIM_NRUN $(cat beamspot.txt)" > beamspot.txt
+export XYZP XYZW LUDECV DELSIM_NRUN
 echo "  DELSIM: LUDECV=$LUDECV NRUN=$DELSIM_NRUN beam spot $(cat beamspot.txt)"
 bash "$REPO/m2_delsim_lxplus.sh" "$W/my_events.fadgen" "$NEV" 45.5935 v94c "$W/out.sdst" > delsim.log 2>&1
 rc=$?
