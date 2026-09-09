@@ -72,15 +72,17 @@ PYTHIA_BUFFER=${PYTHIA_BUFFER:-$(( (NUM_EVENTS + 9) / 10 ))}
 PYTHIA_EVENTS=$((NUM_EVENTS + PYTHIA_BUFFER))
 # Beam-spot override for DELSIM (XYZP centroid, XYZW widths, both in cm).
 # Per-period defaults from data BS measurements; widths converted µm -> cm:
-#   94c : centroid (-0.29911, 0.14225, -0.6121) cm
-#         widths   (105.2, 51.2, 1349.0) µm = (0.01052, 0.00512, 0.1349) cm
+#   94c : centroid (-0.29977, 0.14193, -0.60999) cm   [event-weighted over all 94c data, 1.21M hadronic events;
+#         widths   (115.3, 10.5, 7035) µm = (0.01153, 0.00105, 0.7035) cm    see beamspot/README.md; the earlier
+#         (0.01052, 0.00512, 0.1349) had the y width 5x too wide and the z width 5x too narrow]
+#   For per-job sampling of the run-to-run drift use beamspot/beamspot_for_seed.py (btag_condor/run_btag_job.sh does).
 #   95d : centroid (-0.32026, 0.11079, -0.7589) cm
 #         widths   (120.8, 121.9, 3010.2) µm = (0.01208, 0.01219, 0.30102) cm
 # Override per-job with XYZP / XYZW env vars.
 case "$DELSIM_VERSION" in
     v94c)
-        XYZP_DEFAULT="-0.29911 0.14225 -0.6121"
-        XYZW_DEFAULT="0.01052 0.00512 0.1349"
+        XYZP_DEFAULT="-0.29977 0.14193 -0.60999"
+        XYZW_DEFAULT="0.01153 0.00105 0.7035"
         ;;
     v95d)
         XYZP_DEFAULT="-0.32026 0.11079 -0.7589"
@@ -88,8 +90,8 @@ case "$DELSIM_VERSION" in
         ;;
     *)
         echo "WARNING: no per-period BS defaults for DELSIM_VERSION=$DELSIM_VERSION; falling back to 94c values" >&2
-        XYZP_DEFAULT="-0.29911 0.14225 -0.6121"
-        XYZW_DEFAULT="0.01052 0.00512 0.1349"
+        XYZP_DEFAULT="-0.29977 0.14193 -0.60999"
+        XYZW_DEFAULT="0.01153 0.00105 0.7035"
         ;;
 esac
 XYZP="${XYZP:-$XYZP_DEFAULT}"

@@ -574,10 +574,17 @@ in, re-run with `-STITL`):
   DELSIM's own lifetime table (flat 1.6 ps for beauty).
 - **`XYZP="x y z"` / `XYZW="wx wy wz"`** (cm): the beam-spot centroid and widths. **Always set them
   for physics samples.** DELSIM's built-in v94c beam spot is not the data one — the reconstructed
-  primary vertex lands at about (−1.0, 0.0, −8.0) mm with a 0.6 mm wide spot (the official kk2f4146
-  MC sits there too), versus the 94c data spot `XYZP="-0.29911 0.14225 -0.6121"
-  XYZW="0.01052 0.00512 0.1349"` (95d: `"-0.32026 0.11079 -0.7589"` / `"0.01208 0.01219 0.30102"`).
-  All `*_prod.sh` drivers and `btag_condor/run_btag_job.sh` export these.
+  primary vertex lands at about (−1.0, 0.0, −8.2) mm (the official kk2f4146 MC sits there too, with
+  data-like widths), versus the 94c data spot. **94c values (event-weighted over all 94c data, 1.21M
+  hadronic events, see `beamspot/README.md`): `XYZP="-0.29977 0.14193 -0.60999"
+  XYZW="0.01153 0.00105 0.7035"`.** The values used before 2026-09-09, `XYZW="0.01052 0.00512 0.1349"`,
+  had the y width 5× too wide and the z width 5× too narrow (the y "width" was the run-to-run drift of
+  the centroid). 95d: `"-0.32026 0.11079 -0.7589"` / `"0.01208 0.01219 0.30102"` (not re-derived yet).
+  `run_pipeline.sh` carries the 94c values as defaults; `btag_condor/run_btag_job.sh` draws a data run
+  per job instead (`beamspot/beamspot_for_seed.py`, luminosity-weighted) so the MC also reproduces the
+  run-to-run drift of the centroid (x ±0.05, y ±0.07, z ±1.3 mm). Note that AABTAG builds its MC
+  beam-spot constraint from the true simulated vertex plus the data-year widths (`AABEAM`/`VDBSPT`), so
+  b-tagging never depends on these values; they fix the true-vertex distribution.
 
 > **EBEAM mismatch to note:** `run_delsim_only.sh`'s positional default is **45.625**, but
 > `m2_delsim_lxplus.sh` always passes **45.5935** explicitly, so the in-container default is only seen
@@ -736,11 +743,18 @@ DATE=val_$(date +%H%M%S) \
 
 ### 8.8 b-tagging Z→bb production straight to edm4hep (`btag_condor/run_btag_job.sh`)
 
-A self-contained worker job for lifetime-correct Z→bb samples: `closure_gen` (Pythia 8, key4hep,
+A self-contained worker job for lifetime-correct Z→qq samples: `closure_gen` (Pythia 8, key4hep,
 seed from `PYTHIA_SEED`) → `hepmc2fadgen` (host-side binary from this repo) → DELSIM in the shared
-`.sif` via `m2_delsim_lxplus.sh` with `LUDECV` and the 94c data beam spot → `delphi_sdst_pass`
-(delphi-edm4hep converter) → copy to EOS. It keeps the gzipped FADGEN record actually fed to DELSIM
-under `<dest>/gen/` so GEN-vs-SIM comparisons on the same events stay possible.
+`.sif` via `m2_delsim_lxplus.sh` with `LUDECV` and a per-job 94c data beam spot → `delphi_sdst_pass`
+(delphi-edm4hep converter, with the AABTAG combined tag) → copy to EOS. It keeps the gzipped FADGEN
+record actually fed to DELSIM under `<dest>/gen/` (plus the chosen beam spot as `<label>_<seed>.beamspot`)
+and, by default, the SDST under `<dest>/sdst/` so that a converter change never needs a re-simulation.
+Environment knobs (defaults in brackets): `LABEL` [bb] names the files `<LABEL>_<seed>.*` and picks
+`config_z_<LABEL>.txt`; `REUSE_GEN` [1] feeds an existing `<dest>/gen/<LABEL>_<seed>.fadgen.gz` to DELSIM
+instead of regenerating (a re-simulation then reproduces exactly the previous events); `BEAMSPOT_MODE`
+[per-job | global | env]; `KEEP_SDST` [1]; `REPO`, `SIF`, `CONV` override the checkout, the `.sif` and
+the converter binary (default: the combined-tag binary staged on EOS under `edm4hepSimBTagging/_bin/`).
+Also runs on the VM with apptainer (`_CONDOR_SCRATCH_DIR` unset → `/tmp`), which is how it is tested.
 
 ```bash
 # args: <nev> <process> <LUDECV TRUE|FALSE> <eos_dest> <seed_base>   (seed = base + process)
