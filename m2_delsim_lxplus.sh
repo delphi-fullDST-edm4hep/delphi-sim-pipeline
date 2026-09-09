@@ -12,7 +12,7 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SIF="$REPO/delphi-sim.sif"
+SIF="${SIF:-$REPO/delphi-sim.sif}"
 
 FADGEN="${1:?usage: m2_delsim_lxplus.sh <fadgen_file> [nevmax] [ebeam] [version] [out_sdst]}"
 NEVMAX="${2:-20}"
@@ -24,7 +24,8 @@ NRUN="${DELSIM_NRUN:-100001}"     # DELSIM run number = its RNG seed; vary per j
 
 [ -s "$FADGEN" ] || { echo "ERROR: fadgen file not found/empty: $FADGEN"; exit 1; }
 [ -s "$SIF" ]    || { echo "ERROR: .sif not found: $SIF"; exit 1; }
-command -v singularity >/dev/null || { echo "ERROR: singularity not on this host (run on lxplus)"; exit 1; }
+SING="$(command -v singularity || command -v apptainer || true)"
+[ -n "$SING" ] || { echo "ERROR: neither singularity nor apptainer on this host"; exit 1; }
 
 aklog 2>/dev/null || true
 echo "HOST=$(hostname)  fadgen=$FADGEN  nev=$NEVMAX ebeam=$EBEAM ver=$VERSION nrun=$NRUN"
@@ -35,7 +36,7 @@ SCRATCH="$SCRATCH_ROOT/work"; mkdir -p "$SCRATCH"
 trap 'rm -rf "$SCRATCH_ROOT"' EXIT
 
 echo "=== stage image /work -> $SCRATCH ==="
-singularity exec --bind "$SCRATCH:/host_scratch" "$SIF" cp -a /work/. /host_scratch/ 2>/dev/null || \
+"$SING" exec --bind "$SCRATCH:/host_scratch" "$SIF" cp -a /work/. /host_scratch/ 2>/dev/null || \
   echo "(warn: /work stage returned nonzero; continuing)"
 cp "$FADGEN" "$SCRATCH/my_events.fadgen"
 cp "$REPO/run_delsim_only.sh" "$SCRATCH/run_delsim_only.sh"; chmod +x "$SCRATCH/run_delsim_only.sh"
@@ -48,7 +49,7 @@ if [ -n "${XYZW:-}" ]; then export APPTAINERENV_XYZW="$XYZW" SINGULARITYENV_XYZW
 # LUDECV (default TRUE inside run_delsim_only.sh): pass an explicit override (e.g. LUDECV=FALSE) through.
 if [ -n "${LUDECV:-}" ]; then export APPTAINERENV_LUDECV="$LUDECV" SINGULARITYENV_LUDECV="$LUDECV"; fi
 echo "=== DELSIM inside .sif ===  (BS override XYZP='${XYZP:-}' XYZW='${XYZW:-}'; LUDECV='${LUDECV:-TRUE (default)}')"
-singularity exec --bind /afs:/afs --bind /eos:/eos --bind "$SCRATCH:/work" "$SIF" \
+"$SING" exec --bind /afs:/afs --bind /eos:/eos --bind "$SCRATCH:/work" "$SIF" \
     bash -lc "cd /work && ./run_delsim_only.sh $NEVMAX $NRUN $EBEAM $VERSION"
 RC=$?
 

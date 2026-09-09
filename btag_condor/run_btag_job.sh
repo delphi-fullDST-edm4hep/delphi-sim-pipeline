@@ -1,59 +1,106 @@
 #!/bin/bash
-# Self-contained b-tagging-production job: generate Z->bb (Pythia8/key4hep) -> hepmc2fadgen
-# (status 11 + V, the fix branch) -> DELSIM (.sif, LUDECV switch) -> edm4hep, copy edm4hep to EOS.
-# Runs on a condor worker (needs CVMFS + singularity). All work in worker scratch; only the
-# edm4hep is kept. Args: <nev> <proc> <ludecv TRUE|FALSE> <eos_dest> <seed_base>
+# Self-contained b-tagging-production job: [generate Z->qq (Pythia8/key4hep) -> hepmc2fadgen (status 11 + V)]
+# -> DELSIM (.sif, LUDECV switch, per-job data beam spot) -> edm4hep (converter with the AABTAG combined tag),
+# copy edm4hep (+ SDST + GEN record) to EOS.  Runs on a condor worker (needs CVMFS + singularity/apptainer) or on
+# any host with apptainer (VM test).
+# Args: <nev> <proc> <ludecv TRUE|FALSE> <eos_dest> <seed_base> [config=config_z_bb.txt]
+# The optional 6th argument selects the Pythia config: a bare name is looked up in generators/pythia8/, an absolute
+# path is used as given. Output is <label>_<seed>.edm4hep.root, label from the config (config_z_cc.txt -> cc).
+#
+# Environment knobs (all optional):
+#   LABEL          override the label derived from the config (file names <LABEL>_<seed>.*)
+#   REPO, SIF, CONV  pipeline checkout, delphi-sim .sif, delphi_sdst_pass binary   [AFS work area / $REPO/delphi-sim.sif / EOS-staged combined-tag binary]
+#                  For > ~100 concurrent jobs put the .sif on EOS (SIF=/eos/.../_bin/delphi-sim.sif): 1200 workers staging
+#                  it from AFS stalled the AFS server (jobs held with errno 110 on the log transfer).
+#   REUSE_GEN      1: if $DEST/gen/<LABEL>_<seed>.fadgen.gz exists, feed it to DELSIM instead of regenerating
+#                  (same events as the previous production, independent of the generator build)          [1]
+#   BEAMSPOT_MODE  per-job: XYZP/XYZW of a 94c data run drawn by seed (beamspot/beamspot_for_seed.py);
+#                  global: the 1994 average; env: use XYZP/XYZW as given in the environment              [per-job]
+#   KEEP_SDST      1: also publish the DELSIM SDST to $DEST/sdst/ (so converter changes need no re-simulation) [1]
 set -uo pipefail
 NEV="${1:?nev}"; PROC="${2:?process}"; LUDECV="${3:?TRUE|FALSE}"; DEST="${4:?eos dest}"; BASE="${5:?seed base}"
+CFGARG="${6:-config_z_bb.txt}"
 SEED=$(( BASE + PROC ))
-REPO=/afs/cern.ch/work/z/zhangj/delphi-pythia8-pipeline
-SIF=$REPO/delphi-sim.sif
-CONV=/afs/cern.ch/work/z/zhangj/edm4hep_build_prod/delphi_sdst_pass
-CFG=$REPO/generators/pythia8/config_z_bb.txt
+REPO="${REPO:-/afs/cern.ch/work/z/zhangj/delphi-pythia8-pipeline}"
+SIF="${SIF:-$REPO/delphi-sim.sif}"
+CONV="${CONV:-/eos/experiment/eealliance/Users/zhangj/edm4hepSimBTagging/_bin/delphi_sdst_pass.btag_combined_2026-09-09}"
+case "$CFGARG" in /*) CFG="$CFGARG" ;; *) CFG="$REPO/generators/pythia8/$CFGARG" ;; esac
+[ -s "$CFG" ] || { echo "FATAL: Pythia config not found: $CFG"; exit 27; }
+LABEL_CFG=$(basename "$CFG" .txt); LABEL_CFG=${LABEL_CFG#config_z_}; LABEL_CFG=${LABEL_CFG#config_}
+LABEL="${LABEL:-$LABEL_CFG}"
+REUSE_GEN="${REUSE_GEN:-1}"; BEAMSPOT_MODE="${BEAMSPOT_MODE:-per-job}"; KEEP_SDST="${KEEP_SDST:-1}"
 KEY4HEP=/cvmfs/sw.hsf.org/key4hep/setup.sh
 export PATH=/cvmfs/oasis.opensciencegrid.org/mis/apptainer/bin:$PATH
-command -v singularity >/dev/null 2>&1 || { command -v apptainer >/dev/null 2>&1 || { echo "FATAL: no singularity/apptainer"; exit 20; }; }
+command -v singularity >/dev/null 2>&1 || command -v apptainer >/dev/null 2>&1 || { echo "FATAL: no singularity/apptainer"; exit 20; }
+export SIF
 
-OUT=bb_${SEED}.edm4hep.root
-W="${_CONDOR_SCRATCH_DIR:-$(mktemp -d /tmp/btag.XXXXXX)}/btag_$SEED"; mkdir -p "$W"; cd "$W" || exit 21
-echo "=== btag job: nev=$NEV seed=$SEED ludecv=$LUDECV dest=$DEST host=$(hostname) $(date) ==="
+OUT=${LABEL}_${SEED}.edm4hep.root
+W="${_CONDOR_SCRATCH_DIR:-$(mktemp -d /tmp/btag.XXXXXX)}/btag_${LABEL}_$SEED"; mkdir -p "$W"; cd "$W" || exit 21
+# Own log, copied to $DEST/logs/ on every exit (success or FATAL): the access point writing condor's stdout/stderr to AFS
+# timed out for ~1000 concurrent jobs, so the submit script sends those to /dev/null and this is the record.
+LOGF="$W/job.log"; exec >> "$LOGF" 2>&1
+trap 'rc=$?; mkdir -p "$DEST/logs" 2>/dev/null; cp -f "$LOGF" "$DEST/logs/${LABEL}_${SEED}.log" 2>/dev/null; cd /; rm -rf "$W"; exit $rc' EXIT
+echo "=== btag job: label=$LABEL nev=$NEV seed=$SEED ludecv=$LUDECV dest=$DEST host=$(hostname) $(date) ==="
+echo "  repo=$REPO sif=$SIF conv=$CONV cfg=$CFG reuse_gen=$REUSE_GEN beamspot=$BEAMSPOT_MODE keep_sdst=$KEEP_SDST"
 
-# 1) generate NEV+10% events -> events.hepmc3 (key4hep sourced in a child shell only)
-NGEN=$(( NEV + (NEV+9)/10 ))
-( set +u; source "$KEY4HEP" -r 2026-04-08 >/dev/null 2>&1; set -u
-  PYTHIA_SEED=$SEED "$REPO/generators/pythia8_key4hep/closure_gen" "$NGEN" "$CFG" > gen.log 2>&1 )
-[ -s events.hepmc3 ] || { echo "FATAL: no events.hepmc3"; tail -20 gen.log; exit 22; }
-echo "  generated $(grep -c '^E ' events.hepmc3) events -> events.hepmc3"
+# 1-2) GEN record: reuse the stored one when allowed and present, else generate NEV+10% events and convert to fadgen
+GENGZ="$DEST/gen/${LABEL}_${SEED}.fadgen.gz"
+if [ "$REUSE_GEN" = 1 ] && [ -s "$GENGZ" ]; then
+  gunzip -c "$GENGZ" > my_events.fadgen || { echo "FATAL: cannot gunzip $GENGZ"; exit 22; }
+  echo "  GEN record reused: $GENGZ -> my_events.fadgen ($(stat -c%s my_events.fadgen) B)"; GEN_REUSED=1
+else
+  GEN_REUSED=0
+  NGEN=$(( NEV + (NEV+9)/10 ))
+  ( set +u; source "$KEY4HEP" -r 2026-04-08 >/dev/null 2>&1; set -u
+    PYTHIA_SEED=$SEED "$REPO/generators/pythia8_key4hep/closure_gen" "$NGEN" "$CFG" > gen.log 2>&1 )
+  [ -s events.hepmc3 ] || { echo "FATAL: no events.hepmc3"; tail -20 gen.log; exit 22; }
+  echo "  generated $(grep -c '^E ' events.hepmc3) events -> events.hepmc3"
+  "$REPO/hepmc2fadgen" events.hepmc3 my_events.fadgen > conv_fadgen.log 2>&1
+  [ -s my_events.fadgen ] || { echo "FATAL: hepmc2fadgen produced no fadgen"; tail -20 conv_fadgen.log; exit 23; }
+  grep -E "tagged K\(,1\)=11|WARNING" conv_fadgen.log | tail -3
+fi
 
-# 2) hepmc2fadgen (fix branch: status 11 + V) -> my_events.fadgen (rpath-self-contained)
-"$REPO/hepmc2fadgen" events.hepmc3 my_events.fadgen > conv_fadgen.log 2>&1
-[ -s my_events.fadgen ] || { echo "FATAL: hepmc2fadgen produced no fadgen"; tail -20 conv_fadgen.log; exit 23; }
-grep -E "tagged K\(,1\)=11|WARNING" conv_fadgen.log | tail -3
-
-# 3) DELSIM in the .sif via the shared driver; LUDECV switch + per-job NRUN. Output SDST in scratch.
-# 94c DATA beam spot (cm), same override as every production driver (run_pipeline.sh / run_*_prod.sh):
-# DELSIM's v94c default beam spot is NOT centred on the data one -> reco PV / impact parameters would be off.
-export XYZP="${XYZP:--0.29911 0.14225 -0.6121}" XYZW="${XYZW:-0.01052 0.00512 0.1349}"
-export LUDECV DELSIM_NRUN=$(( 3000 + SEED % 88000 ))
-echo "  DELSIM: LUDECV=$LUDECV NRUN=$DELSIM_NRUN beam spot XYZP=($XYZP) XYZW=($XYZW) cm"
+# 3) beam spot for this job (cm), then DELSIM in the .sif via the shared driver; LUDECV switch + per-job NRUN.
+case "$BEAMSPOT_MODE" in
+  per-job) eval "$(python3 "$REPO/beamspot/beamspot_for_seed.py" "$SEED" 2> beamspot.txt)" ;;
+  global)  eval "$(python3 "$REPO/beamspot/beamspot_for_seed.py" "$SEED" --global 2> beamspot.txt)" ;;
+  env)     [ -n "${XYZP:-}" ] && [ -n "${XYZW:-}" ] || { echo "FATAL: BEAMSPOT_MODE=env needs XYZP and XYZW"; exit 27; }; echo "# beam spot from environment" > beamspot.txt ;;
+  *)       echo "FATAL: BEAMSPOT_MODE=$BEAMSPOT_MODE (per-job|global|env)"; exit 27 ;;
+esac
+[ -n "${XYZP:-}" ] && [ -n "${XYZW:-}" ] || { echo "FATAL: beam spot not set"; cat beamspot.txt; exit 27; }
+# DELSIM run number = RNG seed. DELSIM_NRUN_OFFSET (default 0) shifts it: the escape hatch for a seed whose detector
+# simulation hangs in one event (GEANT loop; 3 of 1200 jobs in the 2026-09 re-simulation) — the generator events stay
+# the same, only the detector random sequence changes. Recorded in the .beamspot sidecar.
+DELSIM_NRUN=$(( 3000 + (SEED + ${DELSIM_NRUN_OFFSET:-0}) % 88000 ))
+echo "XYZP=\"$XYZP\" XYZW=\"$XYZW\" NRUN=$DELSIM_NRUN $(cat beamspot.txt)" > beamspot.txt
+export XYZP XYZW LUDECV DELSIM_NRUN
+echo "  DELSIM: LUDECV=$LUDECV NRUN=$DELSIM_NRUN beam spot $(cat beamspot.txt)"
 bash "$REPO/m2_delsim_lxplus.sh" "$W/my_events.fadgen" "$NEV" 45.5935 v94c "$W/out.sdst" > delsim.log 2>&1
 rc=$?
 [ -s "$W/out.sdst" ] || { echo "FATAL: DELSIM produced no SDST (rc=$rc)"; tail -25 delsim.log; exit 24; }
 echo "  DELSIM: $(grep -c 'Selected DST records' delsim.log) tag; $(grep 'Selected DST records' delsim.log | tail -1)"
+grep -E '^(XYZP|XYZW)[[:space:]]' delsim.log | head -2 | sed 's/^/  title: /'
 
-# 4) SDST -> edm4hep (delphi + key4hep in a child shell)
-( set +u; source /cvmfs/delphi.cern.ch/setup.sh >/dev/null 2>&1; source "$KEY4HEP" -r 2026-04-08 >/dev/null 2>&1; set -u
-  "$CONV" "$W/out.sdst" "$W/$OUT" > conv_edm.log 2>&1 )
+# 4) SDST -> edm4hep (delphi + key4hep in a child shell); the converter needs its own cwd (PDLINPUT, fort.*)
+mkdir -p conv && ( set +u; cd conv; source /cvmfs/delphi.cern.ch/setup.sh >/dev/null 2>&1; source "$KEY4HEP" -r 2026-04-08 >/dev/null 2>&1; set -u
+  "$CONV" "$W/out.sdst" "$W/$OUT" > ../conv_edm.log 2>&1 ); crc=$?
 sz=$(stat -c%s "$W/$OUT" 2>/dev/null || echo 0)
+[ "$crc" -eq 0 ] || { echo "FATAL: converter exit code $crc"; tail -25 conv_edm.log; exit 25; }
 [ "$sz" -gt 500000 ] || { echo "FATAL: edm4hep too small ($sz B)"; tail -25 conv_edm.log; exit 25; }
-echo "  edm4hep: $OUT = $sz B; $(grep -o 'wrote [0-9]* events' conv_edm.log | tail -1)"
+grep -q "PHDST-I-PHEND, Processed" conv_edm.log || { echo "FATAL: converter did not reach PHEND"; tail -25 conv_edm.log; exit 25; }
+echo "  edm4hep: $OUT = $sz B; $(grep -o 'Processed *[0-9]* Selected records' conv_edm.log | tail -1); combined tag: $(grep -c 'Start of Combined tagging' conv_edm.log)"
 
 # 5) publish to EOS (worker has forwarded token via SendCredential)
-mkdir -p "$DEST"
+mkdir -p "$DEST" "$DEST/gen"
 cp "$W/$OUT" "$DEST/$OUT" && echo "PUBLISHED $DEST/$OUT ($sz B) $(date)" || { echo "FATAL: EOS copy failed -> $DEST/$OUT"; exit 26; }
-# 5b) keep the GEN record (the fadgen fed to DELSIM; first NEV events = the simulated ones), gzipped
-mkdir -p "$DEST/gen"
-if gzip -c my_events.fadgen > gen.fadgen.gz && cp gen.fadgen.gz "$DEST/gen/bb_${SEED}.fadgen.gz"; then
-  echo "  GEN record: $DEST/gen/bb_${SEED}.fadgen.gz ($(stat -c%s gen.fadgen.gz) B)"
-else echo "WARNING: GEN record copy failed (edm4hep already published)"; fi
-cd /; rm -rf "$W"
+cp beamspot.txt "$DEST/gen/${LABEL}_${SEED}.beamspot" 2>/dev/null || echo "WARNING: beamspot sidecar copy failed"
+# 5b) keep the GEN record (the fadgen fed to DELSIM; first NEV events = the simulated ones), gzipped, unless reused
+if [ "$GEN_REUSED" = 0 ]; then
+  if gzip -c my_events.fadgen > gen.fadgen.gz && cp gen.fadgen.gz "$GENGZ"; then echo "  GEN record: $GENGZ ($(stat -c%s gen.fadgen.gz) B)"
+  else echo "WARNING: GEN record copy failed (edm4hep already published)"; fi
+fi
+# 5c) keep the SDST so a converter change never needs a re-simulation
+if [ "$KEEP_SDST" = 1 ]; then
+  mkdir -p "$DEST/sdst"
+  cp "$W/out.sdst" "$DEST/sdst/${LABEL}_${SEED}.sdst" && echo "  SDST kept: $DEST/sdst/${LABEL}_${SEED}.sdst ($(stat -c%s "$W/out.sdst") B)" || echo "WARNING: SDST copy failed"
+fi
